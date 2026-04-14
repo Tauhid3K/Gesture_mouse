@@ -36,7 +36,7 @@ Hand gesture-based mouse control using MediaPipe hand tracking. Control your cur
 
 3. **Install dependencies**
    ```bash
-   pip install opencv-python mediapipe pyautogui
+   pip install -r requirements.txt
    ```
 
 4. **Run the application**
@@ -45,6 +45,14 @@ Hand gesture-based mouse control using MediaPipe hand tracking. Control your cur
    ```
 
 The hand landmark model (`hand_landmarker.task`) will be automatically downloaded on first run.
+
+## Testing
+
+To verify the gesture detection and state management logic, you can run the included unit tests:
+
+```bash
+python test_gestures.py
+```
 
 ## Usage
 
@@ -110,12 +118,14 @@ Settings are automatically saved to `handmouse_settings.json`.
 
 ```
 handmouse/
-├── handmouse.py              # Main application
+├── handmouse.py              # Main application (logging enabled)
 ├── config.py                 # Configuration constants
-├── gestures.py               # Gesture detection & scroll logic
+├── gestures.py               # GestureState & detection logic
 ├── model.py                  # Hand tracking model management
 ├── ui.py                     # UI and settings window
 ├── utils.py                  # Utility functions
+├── requirements.txt          # Project dependencies
+├── test_gestures.py          # Unit tests for gesture logic
 ├── hand_landmarker.task      # MediaPipe hand model (auto-downloaded)
 ├── handmouse_settings.json   # User settings (auto-created)
 └── README.md                 # This file

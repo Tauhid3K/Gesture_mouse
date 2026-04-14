@@ -1,5 +1,6 @@
 import ctypes
 import json
+import logging
 import math
 import os
 import subprocess
@@ -17,17 +18,8 @@ from config import (
 	SCROLL_SPEED_MULTIPLIER_DEFAULT,
 	SCROLL_SPEED_MULTIPLIER_MAX,
 	SCROLL_SPEED_MULTIPLIER_MIN,
-	SCROLL_VERTICAL_GAIN,
-	TRACKPAD_DEADZONE,
-	TRACKPAD_SMOOTH_ALPHA,
-	TRACKPAD_SPEED_X,
-	TRACKPAD_SPEED_Y,
-	UI_BUTTON_H,
-	UI_BUTTON_W,
-	UI_GAP,
-	UI_MARGIN,
 )
-from gestures import is_fist_gesture, process_right_hand_gestures
+from gestures import GestureState, is_fist_gesture, process_right_hand_gestures
 from model import create_hand_landmarker, ensure_hand_model
 from ui import (
 	draw_status_and_dpi,
@@ -39,6 +31,14 @@ from ui import (
 )
 from utils import set_arrow_cursor
 from mediapipe.tasks.python.vision.core.image import Image, ImageFormat
+
+# Configure logging
+logging.basicConfig(
+	level=logging.INFO,
+	format="%(asctime)s [%(levelname)s] %(message)s",
+	datefmt="%Y-%m-%d %H:%M:%S",
+)
+logger = logging.getLogger(__name__)
 
 
 def get_virtual_screen_bounds():
@@ -152,7 +152,7 @@ def main():
 	# Open the default webcam that provides frames for hand tracking.
 	cap = cv2.VideoCapture(0)
 	if not cap.isOpened():
-		print("Could not open webcam.")
+		logger.error("Could not open webcam.")
 		return
 
 	window_name = "Hand Mouse Control"
@@ -170,6 +170,15 @@ def main():
 	dpi_trackbar_name = "DPI x100"
 	scroll_trackbar_name = "Scroll Speed"
 
+	# Initialize gesture and cursor state.
+	cursor_pos = pyautogui.position()
+	gesture_state = GestureState(
+		cursor_x=cursor_pos.x,
+		cursor_y=cursor_pos.y,
+		dpi=user_settings["dpi"],
+		scroll_multiplier=user_settings["scroll_multiplier"]
+	)
+
 	# Handle clicks on custom OpenCV-drawn buttons.
 	def on_mouse(event, x, y, flags, param):
 		_ = (flags, param)
@@ -183,37 +192,9 @@ def main():
 
 	setup_ui(window_name, on_mouse)
 
-	# Runtime control variables for cursor smoothing, gesture timing, and click state.
-	cursor_pos = pyautogui.position()
-	cursor_x, cursor_y = float(cursor_pos.x), float(cursor_pos.y)
-	current_dpi = float(user_settings["dpi"])
-	current_speed_x = float(TRACKPAD_SPEED_X)
-	current_speed_y = float(TRACKPAD_SPEED_Y)
-	current_deadzone = float(TRACKPAD_DEADZONE)
-	current_smooth = float(TRACKPAD_SMOOTH_ALPHA)
-	current_scroll_multiplier = float(user_settings["scroll_multiplier"])
-	prev_mid_x = None
-	prev_mid_y = None
-	filtered_dx = 0.0
-	filtered_dy = 0.0
-
-	pinch_start_time = None
-	is_dragging = False
-	last_left_click = 0.0
-
-	scroll_active = False
-	prev_scroll_x = None
-	prev_scroll_y = None
-
-	right_touch_prev = False
-	last_right_click = 0.0
-	last_fist_click = 0.0
-	last_three_finger_click = 0.0
-	fist_prev = False
+	# Runtime control variables for gesture timing and OSK state.
 	left_fist_prev = False
 	last_osk_open = 0.0
-	filtered_scroll_offset_x = 0.0
-	filtered_scroll_offset_y = 0.0
 
 	try:
 		# Main application loop: read webcam frames, detect gestures, and update the UI.
@@ -228,52 +209,15 @@ def main():
 				break
 
 			# Apply button-triggered UI actions such as pause/resume, settings, or exit.
-			(
-				is_dragging,
-				prev_mid_x,
-				prev_mid_y,
-				filtered_dx,
-				filtered_dy,
-				pinch_start_time,
-				scroll_active,
-				prev_scroll_x,
-				prev_scroll_y,
-				filtered_scroll_offset_x,
-				filtered_scroll_offset_y,
-				right_touch_prev,
-				last_left_click,
-				last_fist_click,
-				last_three_finger_click,
-				fist_prev,
-			) = handle_ui_requests(
-				ui_state,
-				request,
-				is_dragging,
-				prev_mid_x,
-				prev_mid_y,
-				filtered_dx,
-				filtered_dy,
-				pinch_start_time,
-				scroll_active,
-				prev_scroll_x,
-				prev_scroll_y,
-				filtered_scroll_offset_x,
-				filtered_scroll_offset_y,
-				right_touch_prev,
-				last_left_click,
-				last_fist_click,
-				last_three_finger_click,
-				fist_prev,
-			)
+			handle_ui_requests(ui_state, request, gesture_state)
 
 			# Keep settings window state in sync for both open and close transitions.
-			current_dpi, current_scroll_multiplier = manage_settings_window(
+			manage_settings_window(
 				ui_state,
 				settings_window_name,
 				dpi_trackbar_name,
 				scroll_trackbar_name,
-				current_dpi,
-				current_scroll_multiplier,
+				gesture_state,
 			)
 
 			# Mirror the preview for natural interaction and scale it for display.
@@ -332,87 +276,27 @@ def main():
 
 			# Convert the detected hand landmarks into cursor movement and mouse actions.
 			if ui_state["tracking_enabled"] and right_lm is not None:
-				(
-					cursor_x,
-					cursor_y,
-					prev_mid_x,
-					prev_mid_y,
-					filtered_dx,
-					filtered_dy,
-					pinch_start_time,
-					is_dragging,
-					last_left_click,
-					scroll_active,
-					prev_scroll_x,
-					prev_scroll_y,
-					right_touch_prev,
-					last_right_click,
-					last_fist_click,
-					last_three_finger_click,
-					fist_prev,
-					filtered_scroll_offset_x,
-					filtered_scroll_offset_y,
-				) = process_right_hand_gestures(
+				process_right_hand_gestures(
 					right_lm,
 					virtual_left,
 					virtual_top,
 					screen_w,
 					screen_h,
-					cursor_x,
-					cursor_y,
-					current_dpi,
-					current_speed_x,
-					current_speed_y,
-					current_deadzone,
-					current_smooth,
-					current_scroll_multiplier,
-					prev_mid_x,
-					prev_mid_y,
-					filtered_dx,
-					filtered_dy,
-					pinch_start_time,
-					is_dragging,
-					last_left_click,
-					scroll_active,
-					prev_scroll_x,
-					prev_scroll_y,
-					right_touch_prev,
-					last_right_click,
-					last_fist_click,
-					last_three_finger_click,
-					fist_prev,
+					gesture_state,
 					now,
-					filtered_scroll_offset_x,
-					filtered_scroll_offset_y,
 				)
 			else:
 				# If tracking is unavailable, reset gesture state and release any active drag.
-				if is_dragging:
-					pyautogui.mouseUp(button="left")
-					is_dragging = False
-				prev_mid_x = None
-				prev_mid_y = None
-				filtered_dx = 0.0
-				filtered_dy = 0.0
-				pinch_start_time = None
-				scroll_active = False
-				prev_scroll_x = None
-				prev_scroll_y = None
-				filtered_scroll_offset_x = 0.0
-				filtered_scroll_offset_y = 0.0
-				right_touch_prev = False
-				last_fist_click = 0.0
-				last_three_finger_click = 0.0
-				fist_prev = False
+				gesture_state.reset_movement()
 
 			# Draw the overlay controls and current tracking status on top of the preview.
-			button_h = UI_BUTTON_H
-			button_w = UI_BUTTON_W
-			gap = UI_GAP
-			base_x = UI_MARGIN
-			base_y = UI_MARGIN
+			button_h = 32 # UI_BUTTON_H
+			button_w = 88 # UI_BUTTON_W
+			gap = 8 # UI_GAP
+			base_x = 10 # UI_MARGIN
+			base_y = 10 # UI_MARGIN
 			draw_ui_buttons(frame, ui_state, button_h, button_w, gap, base_x, base_y)
-			draw_status_and_dpi(frame, ui_state, current_dpi, button_h, base_x, base_y)
+			draw_status_and_dpi(frame, ui_state, gesture_state.dpi, button_h, base_x, base_y)
 
 			position_window(
 				primary_screen_w,
@@ -420,7 +304,7 @@ def main():
 				frame_w,
 				frame_h,
 				window_name,
-				window_margin,
+				10, # window_margin
 			)
 
 			set_arrow_cursor()
@@ -430,17 +314,17 @@ def main():
 			if cv2.waitKey(1) & 0xFF == ord("q"):
 				break
 	except KeyboardInterrupt:
-		print("Hand mouse interrupted by user. Shutting down gracefully...")
+		logger.info("Hand mouse interrupted by user. Shutting down gracefully...")
 
 
 	finally:
 		try:
-			save_user_settings(settings_path, current_dpi, current_scroll_multiplier)
+			save_user_settings(settings_path, gesture_state.dpi, gesture_state.scroll_multiplier)
 		except OSError as exc:
-			print(f"Warning: could not save settings: {exc}")
+			logger.warning(f"Could not save settings: {exc}")
 
 		# Cleanup: mouse, OpenCV windows, MediaPipe, settings
-		if 'is_dragging' in locals() and is_dragging:
+		if 'gesture_state' in locals() and gesture_state.is_dragging:
 			pyautogui.mouseUp(button="left")
 		cap.release()
 		cv2.destroyAllWindows()

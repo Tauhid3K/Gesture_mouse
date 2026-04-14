@@ -5,6 +5,7 @@ import socket
 import tempfile
 import time
 import urllib.request
+import logging
 from config import HAND_MODEL_URL
 from mediapipe.tasks.python.core.base_options import BaseOptions
 from mediapipe.tasks.python.vision.core.vision_task_running_mode import (
@@ -14,6 +15,8 @@ from mediapipe.tasks.python.vision.hand_landmarker import (
     HandLandmarker,
     HandLandmarkerOptions,
 )
+
+logger = logging.getLogger(__name__)
 
 def ensure_hand_model(model_path):
     """Ensure the hand landmarker model exists locally.
@@ -37,7 +40,7 @@ def ensure_hand_model(model_path):
         os.close(temp_fd)
 
         try:
-            print(
+            logger.info(
                 f"Downloading hand landmarker model... "
                 f"(attempt {attempt}/{max_attempts})"
             )
@@ -62,19 +65,19 @@ def ensure_hand_model(model_path):
                         last_reported_mb = downloaded_mb
                         if total_size:
                             percent = downloaded * 100 / total_size
-                            print(
+                            logger.info(
                                 f"  Downloaded {downloaded_mb} MB / "
                                 f"{total_size / (1024 * 1024):.1f} MB "
                                 f"({percent:.1f}%)"
                             )
                         else:
-                            print(f"  Downloaded {downloaded_mb} MB")
+                            logger.info(f"  Downloaded {downloaded_mb} MB")
 
             if os.path.getsize(temp_path) == 0:
                 raise RuntimeError("Downloaded model file is empty.")
 
             os.replace(temp_path, model_path)
-            print("Model downloaded:", model_path)
+            logger.info(f"Model downloaded: {model_path}")
             return
 
         except KeyboardInterrupt:
@@ -97,7 +100,7 @@ def ensure_hand_model(model_path):
                     f"'{os.path.basename(model_path)}' beside the script."
                 ) from exc
 
-            print(f"Download failed: {exc}. Retrying in 2 seconds...")
+            logger.error(f"Download failed: {exc}. Retrying in 2 seconds...")
             time.sleep(2)
         except Exception:
             if os.path.exists(temp_path):

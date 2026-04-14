@@ -19,51 +19,20 @@ def setup_ui(window_name, on_mouse_callback):
     """Setup main window mouse callback."""
     cv2.setMouseCallback(window_name, on_mouse_callback)
 
-def handle_ui_requests(ui_state, request, is_dragging, prev_mid_x, prev_mid_y, filtered_dx, filtered_dy, pinch_start_time, scroll_active, prev_scroll_x, prev_scroll_y, filtered_scroll_offset_x, filtered_scroll_offset_y, right_touch_prev, last_left_click, last_fist_click, last_three_finger_click, fist_prev):
+def handle_ui_requests(ui_state, request, gesture_state):
     """Handle UI button requests (start/pause/settings/close). Reset states on pause."""
     if request == "start":
         ui_state["tracking_enabled"] = True
     elif request == "pause":
         ui_state["tracking_enabled"] = False
-        if is_dragging:
-            pyautogui.mouseUp(button="left")
-            is_dragging = False
-        prev_mid_x = None
-        prev_mid_y = None
-        filtered_dx = 0.0
-        filtered_dy = 0.0
-        pinch_start_time = None
-        scroll_active = False
-        prev_scroll_x = None
-        prev_scroll_y = None
-        filtered_scroll_offset_x = 0.0
-        filtered_scroll_offset_y = 0.0
-        right_touch_prev = False
-        # Preserve click states on pause
+        gesture_state.reset_movement()
     elif request == "settings":
         ui_state["settings_open"] = not ui_state["settings_open"]
     elif request == "close":
         # Will break loop in main
         pass
     ui_state["request"] = None
-    return (
-        is_dragging,
-        prev_mid_x,
-        prev_mid_y,
-        filtered_dx,
-        filtered_dy,
-        pinch_start_time,
-        scroll_active,
-        prev_scroll_x,
-        prev_scroll_y,
-        filtered_scroll_offset_x,
-        filtered_scroll_offset_y,
-        right_touch_prev,
-        last_left_click,
-        last_fist_click,
-        last_three_finger_click,
-        fist_prev
-    )
+
 
 def draw_ui_buttons(frame, ui_state, button_h, button_w, gap, base_x, base_y):
     """Draw UI buttons and update button rects in ui_state."""
@@ -122,7 +91,7 @@ def draw_status_and_dpi(frame, ui_state, current_dpi, button_h, base_x, base_y):
         2,
     )
 
-def manage_settings_window(ui_state, settings_window_name, dpi_trackbar_name, scroll_trackbar_name, current_dpi, current_scroll_multiplier):
+def manage_settings_window(ui_state, settings_window_name, dpi_trackbar_name, scroll_trackbar_name, gesture_state):
     """Manage settings window sliders and live updates for DPI and scroll multiplier."""
     settings_ui_created = ui_state.get('settings_ui_created', False)
     if ui_state["settings_open"]:
@@ -142,14 +111,14 @@ def manage_settings_window(ui_state, settings_window_name, dpi_trackbar_name, sc
                 cv2.createTrackbar(
                     dpi_trackbar_name,
                     settings_window_name,
-                    int(max(DPI_MIN, min(DPI_MAX, current_dpi)) * 100),
+                    int(max(DPI_MIN, min(DPI_MAX, gesture_state.dpi)) * 100),
                     int(DPI_MAX * 100),
                     lambda value: None,
                 )
                 cv2.createTrackbar(
                     scroll_trackbar_name,
                     settings_window_name,
-                    int(max(SCROLL_SPEED_MULTIPLIER_MIN, min(SCROLL_SPEED_MULTIPLIER_MAX, current_scroll_multiplier))),
+                    int(max(SCROLL_SPEED_MULTIPLIER_MIN, min(SCROLL_SPEED_MULTIPLIER_MAX, gesture_state.scroll_multiplier))),
                     int(SCROLL_SPEED_MULTIPLIER_MAX),
                     lambda value: None,
                 )
@@ -161,9 +130,9 @@ def manage_settings_window(ui_state, settings_window_name, dpi_trackbar_name, sc
         if settings_ui_created:
             try:
                 dpi_from_slider = cv2.getTrackbarPos(dpi_trackbar_name, settings_window_name) / 100.0
-                current_dpi = max(DPI_MIN, min(DPI_MAX, dpi_from_slider))
+                gesture_state.dpi = max(DPI_MIN, min(DPI_MAX, dpi_from_slider))
                 scroll_from_slider = cv2.getTrackbarPos(scroll_trackbar_name, settings_window_name)
-                current_scroll_multiplier = max(
+                gesture_state.scroll_multiplier = max(
                     SCROLL_SPEED_MULTIPLIER_MIN,
                     min(SCROLL_SPEED_MULTIPLIER_MAX, float(scroll_from_slider)),
                 )
@@ -184,7 +153,7 @@ def manage_settings_window(ui_state, settings_window_name, dpi_trackbar_name, sc
             )
             cv2.putText(
                 settings_canvas,
-                f"DPI: {current_dpi:.2f}",
+                f"DPI: {gesture_state.dpi:.2f}",
                 (14, 72),
                 cv2.FONT_HERSHEY_SIMPLEX,
                 0.65,
@@ -193,7 +162,7 @@ def manage_settings_window(ui_state, settings_window_name, dpi_trackbar_name, sc
             )
             cv2.putText(
                 settings_canvas,
-                f"Scroll Speed: {int(current_scroll_multiplier)}x",
+                f"Scroll Speed: {int(gesture_state.scroll_multiplier)}x",
                 (14, 112),
                 cv2.FONT_HERSHEY_SIMPLEX,
                 0.62,
@@ -209,7 +178,6 @@ def manage_settings_window(ui_state, settings_window_name, dpi_trackbar_name, sc
             except cv2.error:
                 pass
             ui_state['settings_ui_created'] = False
-    return current_dpi, current_scroll_multiplier
 
 def position_window(screen_w, screen_h, frame_w, frame_h, window_name, window_margin):
     """Position the preview at the bottom-right corner of the primary display, slightly above the taskbar."""
