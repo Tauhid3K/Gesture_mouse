@@ -13,17 +13,27 @@ HAND_MODEL_URL = (
 HAND_MODEL_FILE = "hand_landmarker.task"
 
 # Hand landmark indices
+WRIST = 0
+THUMB_CMC = 1
+THUMB_MCP = 2
+THUMB_IP = 3
 THUMB_TIP = 4
+INDEX_MCP = 5
 INDEX_PIP = 6
+INDEX_DIP = 7
 INDEX_TIP = 8
 MIDDLE_MCP = 9
 MIDDLE_PIP = 10
+MIDDLE_DIP = 11
 MIDDLE_TIP = 12
+RING_MCP = 13
 RING_PIP = 14
+RING_DIP = 15
 RING_TIP = 16
+PINKY_MCP = 17
 PINKY_PIP = 18
+PINKY_DIP = 19
 PINKY_TIP = 20
-WRIST = 0
 
 # Mouse/trackpad settings
 MOUSE_DPI = 1.0
@@ -31,10 +41,10 @@ DPI_STEP = 0.1
 DPI_MIN = 0.3
 DPI_MAX = 3.0
 
-TRACKPAD_SPEED_X = 2.6
-TRACKPAD_SPEED_Y = 2.6
-TRACKPAD_DEADZONE = 0.0018
-TRACKPAD_SMOOTH_ALPHA = 0.45
+TRACKPAD_SPEED_X = 3.2 # Increased for responsiveness
+TRACKPAD_SPEED_Y = 3.2 # Increased for responsiveness
+TRACKPAD_DEADZONE = 0.0015 # Slightly tighter deadzone
+TRACKPAD_SMOOTH_ALPHA = 0.30 # Lower for much smoother (less jittery) motion
 
 # Scroll gesture tuning (wheel-like two-axis scrolling)
 SCROLL_DEADZONE = 0.003

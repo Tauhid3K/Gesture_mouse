@@ -4,7 +4,7 @@ Hand gesture-based mouse control using MediaPipe hand tracking. Control your cur
 
 ## Features
 
-- 🖱️ **Cursor Control** - Move your hand to move the cursor
+- 🖐️ **Palm-Only Cursor Control** - Move your palm/hand base to move the cursor (finger motion is ignored)
 - 🖱️ **Left Click** - Pinch index finger and thumb
 - 🖱️ **Right Click** - Touch thumb and pinky finger
 - 🖱️ **Drag & Drop** - Hold pinch for 0.5 seconds then move
@@ -71,7 +71,7 @@ A window will open showing your webcam feed with:
 
 | Gesture | Action | Notes |
 |---------|--------|-------|
-| **Palm Movement** | Move Cursor | Palm center tracks smoothly |
+| **Palm Movement** | Move Cursor | Cursor follows palm base (wrist + side knuckles), not finger tips |
 | **Index + Thumb Pinch** (hold <0.5s) | Left Click | Quick pinch = click |
 | **Index + Thumb Pinch** (hold >0.5s) | Drag & Drop | Hold longer to drag, move hand while pinching |
 | **Thumb + Pinky Touch** | Right Click | Brief touch triggers right click |
@@ -156,6 +156,7 @@ DISPLAY_SCALE = 0.62            # Preview window scale
 ### Cursor jumps around
 - Reduce `TRACKPAD_DEADZONE` for more responsiveness
 - Increase `TRACKPAD_SMOOTH_ALPHA` for smoother movement (max 0.99)
+- Keep palm in view; finger flexing alone should not move the cursor
 
 ### Scroll not working
 - Make sure you have the correct gesture shape (index & middle UP, ring & pinky DOWN)
@@ -250,4 +251,4 @@ For issues or questions:
 ---
 
 **Version**: 1.0  
-**Last Updated**: April 2026
+**Last Updated**: April 18, 2026
