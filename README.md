@@ -5,7 +5,7 @@ Hand gesture-based mouse control using MediaPipe hand tracking. Control your cur
 ## Features
 
 - 🖐️ **Palm-Only Cursor Control** - Move your palm/hand base to move the cursor (finger motion is ignored).
-- 🖱️ **Left Click** - Pinch index finger and thumb (quick pinch).
+- 🖱️ **Left Click** - Pinch index finger, middle fingure and thumb (quick pinch).
 - 🖱️ **Right Click** - Touch thumb and pinky finger.
 - 🖱️ **Drag & Drop** - Hold pinch for 0.24 seconds then move.
 - 🔼 **Scroll** - Two-finger gesture (index & middle UP, ring & pinky DOWN) to scroll.
