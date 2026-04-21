@@ -71,7 +71,7 @@ To create a standalone Windows executable:
 | Gesture | Action | Notes |
 |---------|--------|-------|
 | **Palm Movement** | Move Cursor | Cursor follows palm base, ignores finger wiggling. |
-| **Index + Thumb Pinch** | Left Click / Drag | Quick pinch = click. Hold > 0.24s = drag. |
+| **Index + Middle + Thumb Pinch** | Left Click / Drag | Quick pinch = click. Hold > 0.24s = drag. |
 | **Thumb + Pinky Touch** | Right Click | Brief touch triggers right click. |
 | **Index + Middle UP** | Scroll Mode | Ring and pinky must be folded. Move hand Up/Down to scroll. |
 | **Thumbs Up** 👍 | Volume Up | Available on both hands. Stops mouse movement while active. |
@@ -108,5 +108,5 @@ To create a standalone Windows executable:
 
 ---
 
-**Version**: 1.1  
+**Version**: 1.0
 **Last Updated**: April 20, 2026
