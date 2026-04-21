@@ -18,8 +18,8 @@ from config import (
 )
 
 THREE_FINGER_THRESHOLD = 0.25 # Reliable for pinch
-SELECT_HOLD_SECONDS = 0.5
-SELECT_RELEASE_GRACE_SECONDS = 0.10
+SELECT_HOLD_SECONDS = 0.24
+SELECT_RELEASE_GRACE_SECONDS = 0.15
 DRAG_SMOOTH_ALPHA = 0.18
 DRAG_SPEED_SCALE = 0.65
 CLICK_HOLD_SECONDS = 0.03
@@ -83,6 +83,21 @@ def is_fist_gesture(lm, min_folded=3):
             folded_count += 1
     return folded_count >= min_folded
 
+def is_proper_fist(lm):
+    """A stricter fist check: all non-thumb fingers must be folded and thumb must be tucked."""
+    # 1. All 4 main fingers must be folded
+    if not is_fist_gesture(lm, min_folded=4):
+        return False
+    # 2. Thumb tip should be close to the palm/knuckles, not extended
+    wrist = lm[WRIST]
+    scale = dist(lm[WRIST], lm[MIDDLE_MCP])
+    thumb_to_wrist = dist(lm[THUMB_TIP], wrist)
+    # In a proper fist, the thumb is usually tucked over fingers or palm.
+    # Its distance to wrist is much smaller than when extended.
+    if thumb_to_wrist > (scale * 1.5):
+        return False
+    return True
+
 def is_thumbs_up(lm):
     """Detect Thumbs Up: Strict vertical check with palm clearance."""
     # 1. All non-thumb fingers must be tightly folded
@@ -96,7 +111,7 @@ def is_thumbs_up(lm):
         return False
     # 3. Palm clearance
     palm_y = (lm[INDEX_MCP].y + lm[MIDDLE_MCP].y + lm[RING_MCP].y + lm[PINKY_MCP].y) / 4.0
-    return lm[THUMB_TIP].y < palm_y - 0.12
+    return lm[THUMB_TIP].y < palm_y - 0.08
 
 def is_thumbs_down(lm):
     """Detect Thumbs Down: Strict vertical check with palm clearance."""
@@ -111,7 +126,7 @@ def is_thumbs_down(lm):
         return False
     # 3. Palm clearance
     palm_y = (lm[INDEX_MCP].y + lm[MIDDLE_MCP].y + lm[RING_MCP].y + lm[PINKY_MCP].y) / 4.0
-    return lm[THUMB_TIP].y > palm_y + 0.12
+    return lm[THUMB_TIP].y > palm_y + 0.08
 
 def get_palm_center(lm):
     """Return a palm-base anchor that is insensitive to finger articulation."""
@@ -225,19 +240,43 @@ def is_three_finger_touch(lm, hand_scale):
     threshold = THREE_FINGER_THRESHOLD * hand_scale
     return d1 < threshold and d2 < threshold
 
-def is_index_thumb_pinch(lm, hand_scale):
-    """Detect a standard thumb-index pinch."""
-    return fingertip_touch(lm, THUMB_TIP, INDEX_TIP, hand_scale, ratio=0.30)
+def is_any_finger_folded(lm):
+    """Check if any of the four main fingers are folded toward the wrist."""
+    wrist = lm[WRIST]
+    for tip, pip in [(INDEX_TIP, INDEX_PIP), (MIDDLE_TIP, MIDDLE_PIP), 
+                     (RING_TIP, RING_PIP), (PINKY_TIP, PINKY_PIP)]:
+        if dist(lm[tip], wrist) < dist(lm[pip], wrist):
+            return True
+    return False
 
 def is_select_gesture(lm, hand_scale):
-    """Detect the gesture used for click/select and drag."""
-    return is_index_thumb_pinch(lm, hand_scale) or is_three_finger_touch(lm, hand_scale)
+    """Detect the gesture used for click/select and drag. Returns False if hand is a fist or open."""
+    # 1. Require at least ONE of the main fingers (Index, Middle, Ring, Pinky) to be folded.
+    # This prevents an open hand from accidentally triggering a "select" if tips look close.
+    if not is_any_finger_folded(lm):
+        return False
+
+    # 2. Check for pinch gestures (tighter ratio for precision)
+    pinch = (fingertip_touch(lm, THUMB_TIP, INDEX_TIP, hand_scale, ratio=0.25) or 
+             fingertip_touch(lm, THUMB_TIP, MIDDLE_TIP, hand_scale, ratio=0.25) or 
+             is_three_finger_touch(lm, hand_scale))
+    
+    if not pinch:
+        return False
+
+    # 3. Finally, ensure it's not a full fist (which often puts thumb near tips)
+    if is_proper_fist(lm):
+        return False
+        
+    return True
 
 def is_thumb_pinky_touch(lm, hand_scale):
+    """Check for thumb-pinky touch, used for right clicks."""
     return fingertip_touch(lm, THUMB_TIP, PINKY_TIP, hand_scale, ratio=0.30)
 
-def update_select_drag_state(select_touch, state: GestureState, now):
-    """Convert a select gesture into click or drag behavior."""
+def update_select_drag_state(select_touch, keep_dragging, state: GestureState, now):
+    """Convert a select gesture into click or drag behavior. 
+    If dragging, persists until keep_dragging is False (hand fully open)."""
     if select_touch:
         state.select_last_seen_time = now
         if state.pinch_start_time is None:
@@ -245,6 +284,10 @@ def update_select_drag_state(select_touch, state: GestureState, now):
         elif not state.is_dragging and (now - state.pinch_start_time) >= SELECT_HOLD_SECONDS:
             pyautogui.mouseDown(button="left")
             state.is_dragging = True
+    elif state.is_dragging and keep_dragging:
+        # Lenient Drag: Even if pinch is lost, keep the mouse down as long as some fingers are folded.
+        state.select_last_seen_time = now # Refresh grace period
+        return
     else:
         # Tolerate short tracking dropouts while pinching to prevent accidental drag release.
         if state.select_last_seen_time is not None and (now - state.select_last_seen_time) <= SELECT_RELEASE_GRACE_SECONDS:
@@ -262,16 +305,16 @@ def process_right_hand_gestures(lm, virtual_left, virtual_top, screen_w, screen_
     mid_x, mid_y = get_palm_center(lm)
     
     select_touch = is_select_gesture(lm, hand_scale)
-    right_touch = is_thumb_pinky_touch(lm, hand_scale)
+    keep_dragging = is_any_finger_folded(lm)
+    right_touch = fingertip_touch(lm, THUMB_TIP, PINKY_TIP, hand_scale, ratio=0.30)
+    
+    # Check for volume gestures to suppress other actions
+    vol_gesture = is_thumbs_up(lm) or is_thumbs_down(lm)
 
-    if select_touch or right_touch:
+    if select_touch or right_touch or vol_gesture:
         scroll_gesture = False
-        vol_up_gesture = False
-        vol_down_gesture = False
     else:
         scroll_gesture = is_two_finger_scroll_gesture(lm)
-        vol_up_gesture = is_thumbs_up(lm)
-        vol_down_gesture = is_thumbs_down(lm)
 
     if state.prev_mid_x is None:
         state.prev_mid_x, state.prev_mid_y = mid_x, mid_y
@@ -289,7 +332,7 @@ def process_right_hand_gestures(lm, virtual_left, virtual_top, screen_w, screen_
         state.filtered_dy += (raw_dy - state.filtered_dy) * smooth_alpha
 
         # Allow movement if dragging or if no click gesture is held.
-        movement_blocked = scroll_gesture or (select_touch and not state.is_dragging) or right_touch
+        movement_blocked = scroll_gesture or (select_touch and not state.is_dragging and (now - (state.pinch_start_time or now)) < 0.05) or right_touch or vol_gesture
         if not movement_blocked:
             state.cursor_x += state.filtered_dx * screen_w * TRACKPAD_SPEED_X * state.dpi * speed_scale
             state.cursor_y += state.filtered_dy * screen_h * TRACKPAD_SPEED_Y * state.dpi * speed_scale
@@ -297,16 +340,7 @@ def process_right_hand_gestures(lm, virtual_left, virtual_top, screen_w, screen_
             state.cursor_y = max(float(virtual_top), min(float(virtual_top + screen_h - 1), state.cursor_y))
             pyautogui.moveTo(state.cursor_x, state.cursor_y)
 
-    if scroll_gesture and not (vol_up_gesture or vol_down_gesture):
+    if scroll_gesture:
         process_scroll_motion(mid_x, mid_y, state)
     else:
         state.scroll_active = False
-
-    if vol_up_gesture:
-        if (now - state.last_volume_step) > 0.3:
-            pyautogui.press("volumeup")
-            state.last_volume_step = now
-    elif vol_down_gesture:
-        if (now - state.last_volume_step) > 0.3:
-            pyautogui.press("volumedown")
-            state.last_volume_step = now

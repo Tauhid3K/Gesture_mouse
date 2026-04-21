@@ -40,8 +40,8 @@ def draw_ui_buttons(frame, ui_state, button_h, button_w, gap, base_x, base_y):
     button_defs = [
         ("start", "START", (50, 170, 60)),
         ("pause", "PAUSE", (40, 150, 220)),
-        ("close", "CLOSE", (40, 40, 220)),
-        ("settings", "", (70, 70, 70)),
+        ("settings", "SETTINGS", (70, 70, 70)),
+        ("close", "EXIT", (40, 40, 220)),
     ]
     for idx, (action, label, color) in enumerate(button_defs):
         x1 = base_x + idx * (button_w + gap)
@@ -51,44 +51,46 @@ def draw_ui_buttons(frame, ui_state, button_h, button_w, gap, base_x, base_y):
         ui_state["buttons"][action] = (x1, y1, x2, y2)
         cv2.rectangle(frame, (x1, y1), (x2, y2), color, -1)
         cv2.rectangle(frame, (x1, y1), (x2, y2), (240, 240, 240), 1)
+        
+        # Center text better
+        text_size = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.45, 1)[0]
+        text_x = x1 + (button_w - text_size[0]) // 2
+        text_y = y1 + (button_h + text_size[1]) // 2
+        
         cv2.putText(
             frame,
             label,
-            (x1 + 16, y1 + 23),
+            (text_x, text_y),
             cv2.FONT_HERSHEY_SIMPLEX,
-            0.55,
+            0.45,
             (255, 255, 255),
-            2,
+            1,
+            cv2.LINE_AA
         )
-        if action == "settings":
-            # Settings icon (sliders)
-            cy = y1 + 9
-            for yoff, knob_x in ((0, x1 + 26), (8, x1 + 44), (16, x1 + 34)):
-                line_y = cy + yoff
-                cv2.line(frame, (x1 + 14, line_y), (x2 - 14, line_y), (230, 230, 230), 2)
-                cv2.circle(frame, (knob_x, line_y), 3, (230, 230, 230), -1)
 
 def draw_status_and_dpi(frame, ui_state, current_dpi, button_h, base_x, base_y):
     """Draw status text and DPI display."""
-    status_text = "RUNNING" if ui_state["tracking_enabled"] else "PAUSED"
-    status_color = (60, 200, 60) if ui_state["tracking_enabled"] else (40, 180, 255)
+    status_text = "System: ACTIVE" if ui_state["tracking_enabled"] else "System: STANDBY"
+    status_color = (100, 255, 100) if ui_state["tracking_enabled"] else (80, 180, 255)
     cv2.putText(
         frame,
         status_text,
         (base_x, base_y + button_h + 24),
         cv2.FONT_HERSHEY_SIMPLEX,
-        0.62,
+        0.52,
         status_color,
-        2,
+        1,
+        cv2.LINE_AA
     )
     cv2.putText(
         frame,
-        f"DPI {current_dpi:.2f}",
-        (base_x + 200, base_y + button_h + 24),
+        f"Sensitivity: {current_dpi:.2f}x",
+        (base_x + 180, base_y + button_h + 24),
         cv2.FONT_HERSHEY_SIMPLEX,
-        0.58,
+        0.50,
         (220, 220, 220),
-        2,
+        1,
+        cv2.LINE_AA
     )
 
 def manage_settings_window(ui_state, settings_window_name, dpi_trackbar_name, scroll_trackbar_name, gesture_state):
@@ -106,17 +108,17 @@ def manage_settings_window(ui_state, settings_window_name, dpi_trackbar_name, sc
 
         if not settings_ui_created:
             try:
-                cv2.namedWindow(settings_window_name, cv2.WINDOW_NORMAL)
-                cv2.resizeWindow(settings_window_name, SETTINGS_WINDOW_W, SETTINGS_WINDOW_H)
+                cv2.namedWindow(settings_window_name, cv2.WINDOW_AUTOSIZE)
+                # Short names prevent truncation in the grey trackbar area
                 cv2.createTrackbar(
-                    dpi_trackbar_name,
+                    "Speed",
                     settings_window_name,
                     int(max(DPI_MIN, min(DPI_MAX, gesture_state.dpi)) * 100),
                     int(DPI_MAX * 100),
                     lambda value: None,
                 )
                 cv2.createTrackbar(
-                    scroll_trackbar_name,
+                    "Scroll",
                     settings_window_name,
                     int(max(SCROLL_SPEED_MULTIPLIER_MIN, min(SCROLL_SPEED_MULTIPLIER_MAX, gesture_state.scroll_multiplier))),
                     int(SCROLL_SPEED_MULTIPLIER_MAX),
@@ -129,9 +131,10 @@ def manage_settings_window(ui_state, settings_window_name, dpi_trackbar_name, sc
 
         if settings_ui_created:
             try:
-                dpi_from_slider = cv2.getTrackbarPos(dpi_trackbar_name, settings_window_name) / 100.0
+                # Read from the short-named trackbars
+                dpi_from_slider = cv2.getTrackbarPos("Speed", settings_window_name) / 100.0
                 gesture_state.dpi = max(DPI_MIN, min(DPI_MAX, dpi_from_slider))
-                scroll_from_slider = cv2.getTrackbarPos(scroll_trackbar_name, settings_window_name)
+                scroll_from_slider = cv2.getTrackbarPos("Scroll", settings_window_name)
                 gesture_state.scroll_multiplier = max(
                     SCROLL_SPEED_MULTIPLIER_MIN,
                     min(SCROLL_SPEED_MULTIPLIER_MAX, float(scroll_from_slider)),
@@ -141,34 +144,34 @@ def manage_settings_window(ui_state, settings_window_name, dpi_trackbar_name, sc
                 ui_state["settings_open"] = False
 
         if settings_ui_created:
-            settings_canvas = np.zeros((SETTINGS_WINDOW_H, SETTINGS_WINDOW_W, 3), dtype=np.uint8)
+            # Much shorter canvas for a minimal look
+            canvas_h = 80
+            settings_canvas = np.zeros((canvas_h, SETTINGS_WINDOW_W, 3), dtype=np.uint8)
+            # Dark background
+            cv2.rectangle(settings_canvas, (0, 0), (SETTINGS_WINDOW_W, canvas_h), (28, 28, 28), -1)
+            
+            # Detailed labels in the canvas area
             cv2.putText(
                 settings_canvas,
-                "Mouse Settings",
-                (14, 30),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                0.75,
-                (230, 230, 230),
-                2,
+                f"Cursor Sensitivity: {gesture_state.dpi:.2f}x",
+                (14, 32),
+                cv2.FONT_HERSHEY_DUPLEX,
+                0.48,
+                (220, 220, 220),
+                1,
+                cv2.LINE_AA
             )
             cv2.putText(
                 settings_canvas,
-                f"DPI: {gesture_state.dpi:.2f}",
-                (14, 72),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                0.65,
-                (80, 220, 80),
-                2,
+                f"Scrolling Intensity: {gesture_state.scroll_multiplier:.1f}x",
+                (14, 62),
+                cv2.FONT_HERSHEY_DUPLEX,
+                0.48,
+                (220, 220, 220),
+                1,
+                cv2.LINE_AA
             )
-            cv2.putText(
-                settings_canvas,
-                f"Scroll Speed: {int(gesture_state.scroll_multiplier)}x",
-                (14, 112),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                0.62,
-                (80, 220, 80),
-                2,
-            )
+            
             cv2.imshow(settings_window_name, settings_canvas)
         ui_state['settings_ui_created'] = settings_ui_created
     else:
@@ -179,10 +182,14 @@ def manage_settings_window(ui_state, settings_window_name, dpi_trackbar_name, sc
                 pass
             ui_state['settings_ui_created'] = False
 
-def position_window(screen_w, screen_h, frame_w, frame_h, window_name, window_margin):
-    """Position the preview at the bottom-right corner of the primary display, slightly above the taskbar."""
-    window_x = max(0, screen_w - frame_w - window_margin)
-    window_y = max(0, screen_h - frame_h - window_margin - WINDOW_BOTTOM_OFFSET)
+def position_window(screen_w, screen_h, frame_w, frame_h, window_name, window_margin, ui_state):
+    """Position the preview. Defaults to bottom-left corner, but respects user dragging."""
+    if not ui_state.get("moved_by_user", False) or ui_state.get("window_x") is None:
+        ui_state["window_x"] = window_margin
+        ui_state["window_y"] = max(0, screen_h - frame_h - window_margin - WINDOW_BOTTOM_OFFSET)
+    
+    window_x = ui_state["window_x"]
+    window_y = ui_state["window_y"]
 
     # Native Win32 topmost positioning is more reliable than OpenCV's window flag alone.
     hwnd = ctypes.windll.user32.FindWindowW(None, window_name)
@@ -191,6 +198,9 @@ def position_window(screen_w, screen_h, frame_w, frame_h, window_name, window_ma
         SWP_NOACTIVATE = 0x0010
         SWP_SHOWWINDOW = 0x0040
         HWND_TOPMOST = -1
+        # If user is dragging, we don't want to fight them by calling SetWindowPos every frame 
+        # with fixed coordinates, but we DO want to keep it topmost.
+        # Actually, if we are tracking window_x/y in ui_state, we can call it.
         ctypes.windll.user32.SetWindowPos(
             hwnd,
             HWND_TOPMOST,
@@ -205,7 +215,11 @@ def position_window(screen_w, screen_h, frame_w, frame_h, window_name, window_ma
         cv2.setWindowProperty(window_name, cv2.WND_PROP_TOPMOST, 1)
     except cv2.error:
         pass
-    try:
-        cv2.moveWindow(window_name, window_x, window_y)
-    except cv2.error:
-        pass
+    
+    # We only call moveWindow if we haven't just called SetWindowPos which also moves it.
+    # SetWindowPos is more authoritative on Windows.
+    if not hwnd:
+        try:
+            cv2.moveWindow(window_name, int(window_x), int(window_y))
+        except cv2.error:
+            pass

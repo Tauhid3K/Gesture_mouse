@@ -25,11 +25,12 @@ from config import (
 	SCROLL_SPEED_MULTIPLIER_MIN, WRIST, MIDDLE_MCP
 )
 from gestures import (
-	GestureState, is_fist_gesture, process_right_hand_gestures,
+	GestureState, is_proper_fist, process_right_hand_gestures,
 	is_select_gesture, is_thumb_pinky_touch, send_mouse_click,
 	update_select_drag_state,
-	is_thumbs_up, is_thumbs_down
+	is_thumbs_up, is_thumbs_down, is_any_finger_folded
 )
+
 from model import create_hand_landmarker, ensure_hand_model
 from ui import (
 	draw_status_and_dpi, draw_ui_buttons, handle_ui_requests,
@@ -98,17 +99,50 @@ def main():
 
 	window_name = "Hand Mouse Control"
 	cv2.namedWindow(window_name, cv2.WINDOW_AUTOSIZE)
-	ui_state = {"tracking_enabled": True, "request": None, "buttons": {}, "settings_open": False}
+	ui_state = {
+		"tracking_enabled": True, 
+		"request": None, 
+		"buttons": {}, 
+		"settings_open": False,
+		"dragging": False,
+		"drag_start_mouse_x": 0,
+		"drag_start_mouse_y": 0,
+		"drag_start_win_x": 0,
+		"drag_start_win_y": 0,
+		"window_x": None,
+		"window_y": None,
+		"moved_by_user": False
+	}
 	
 	gesture_state = GestureState(pyautogui.position().x, pyautogui.position().y, user_settings["dpi"], user_settings["scroll_multiplier"])
 
 	def on_mouse(event, x, y, flags, param):
 		set_arrow_cursor()
 		if event == cv2.EVENT_LBUTTONDOWN:
+			# Check buttons first
 			for action, (x1, y1, x2, y2) in ui_state["buttons"].items():
 				if x1 <= x <= x2 and y1 <= y <= y2:
 					ui_state["request"] = action
 					return
+			# If not a button, start dragging the window
+			ui_state["dragging"] = True
+			curr_mx, curr_my = pyautogui.position()
+			ui_state["drag_start_mouse_x"] = curr_mx
+			ui_state["drag_start_mouse_y"] = curr_my
+			ui_state["drag_start_win_x"] = ui_state["window_x"] if ui_state["window_x"] is not None else 0
+			ui_state["drag_start_win_y"] = ui_state["window_y"] if ui_state["window_y"] is not None else 0
+		
+		elif event == cv2.EVENT_LBUTTONUP:
+			ui_state["dragging"] = False
+		
+		elif event == cv2.EVENT_MOUSEMOVE:
+			if ui_state["dragging"]:
+				curr_mx, curr_my = pyautogui.position()
+				dx = curr_mx - ui_state["drag_start_mouse_x"]
+				dy = curr_my - ui_state["drag_start_mouse_y"]
+				ui_state["window_x"] = ui_state["drag_start_win_x"] + dx
+				ui_state["window_y"] = ui_state["drag_start_win_y"] + dy
+				ui_state["moved_by_user"] = True
 
 	setup_ui(window_name, on_mouse)
 	left_fist_prev, last_osk_open = False, 0.0
@@ -134,35 +168,43 @@ def main():
 				result = hand_landmarker.detect_for_video(mp_image, int(time.time() * 1000))
 			else: result = None
 
+			# --- HAND DETECTION AND GESTURE PROCESSING ---
+			# Identity which hand is Left and which is Right (result is from MediaPipe)
 			right_lm, left_lm = None, None
 			if result:
 				for landmarks, handedness in zip(result.hand_landmarks, result.handedness):
+					# Draw small circles on detected hand joints
 					for p in landmarks: cv2.circle(frame, (int(p.x * fw), int(p.y * fh)), 2, (255, 0, 0), -1)
-					if handedness[0].category_name == "Left": right_lm = landmarks
+					if handedness[0].category_name == "Left": right_lm = landmarks # "Left" label = Right hand due to mirror
 					else: left_lm = landmarks
 
 			now = time.time()
 			if ui_state["tracking_enabled"]:
+				# Process the primary mouse movement using the Right Hand
 				if right_lm: process_right_hand_gestures(right_lm, v_left, v_top, screen_w, screen_h, gesture_state, now)
 				
-				# CLICK DETECTION FOR BOTH HANDS
-				select_touch = False
-				r_click_touch = False
+				# Track separate flags for left-click, right-click, and "is a finger folded"
+				l_select, r_select = False, False
+				l_keep, r_keep = False, False
+				l_right, r_right = False, False
 				
-				# Check Left Hand
+				# --- LEFT HAND UTILITY LOGIC ---
 				if left_lm:
 					scale_l = max(dist(left_lm[WRIST], left_lm[MIDDLE_MCP]), 1e-6)
-					select_touch = is_select_gesture(left_lm, scale_l)
-					r_click_touch = is_thumb_pinky_touch(left_lm, scale_l)
+					l_select = is_select_gesture(left_lm, scale_l)
+					l_keep = is_any_finger_folded(left_lm)
+					l_right = is_thumb_pinky_touch(left_lm, scale_l)
 					
-					# Process Left Hand specific gestures (OSK, Volume) only if not selecting
-					if not select_touch:
-						fist_now = is_fist_gesture(left_lm) or is_compact_fist(left_lm)
+					# If not trying to click, check for OSK and Volume controls
+					if not l_select:
+						# Open On-Screen Keyboard (OSK) if a tight fist is detected
+						fist_now = is_proper_fist(left_lm)
 						if fist_now and not left_fist_prev and (now - last_osk_open) > 1.5:
 							open_on_screen_keyboard()
 							last_osk_open = now
 						left_fist_prev = fist_now
 
+						# Handle Thumbs Up/Down for Volume
 						if is_thumbs_up(left_lm):
 							if (now - gesture_state.last_volume_step) > 0.3:
 								pyautogui.press("volumeup")
@@ -172,30 +214,51 @@ def main():
 								pyautogui.press("volumedown")
 								gesture_state.last_volume_step = now
 					else:
-						left_fist_prev = True # Suppress OSK while selecting
+						left_fist_prev = True # Suppress OSK while clicking
 				else:
 					left_fist_prev = False
 
-				# Check Right Hand for clicks (in addition to movement)
+				# --- RIGHT HAND CLICK LOGIC ---
 				if right_lm:
 					scale_r = max(dist(right_lm[WRIST], right_lm[MIDDLE_MCP]), 1e-6)
-					select_touch = select_touch or is_select_gesture(right_lm, scale_r)
-					r_click_touch = r_click_touch or is_thumb_pinky_touch(right_lm, scale_r)
+					r_select = is_select_gesture(right_lm, scale_r)
+					r_keep = is_any_finger_folded(right_lm)
+					r_right = is_thumb_pinky_touch(right_lm, scale_r)
 
-				update_select_drag_state(select_touch, gesture_state, now)
+					# Right hand can also control volume when not clicking
+					if not r_select:
+						if is_thumbs_up(right_lm):
+							if (now - gesture_state.last_volume_step) > 0.3:
+								pyautogui.press("volumeup")
+								gesture_state.last_volume_step = now
+						elif is_thumbs_down(right_lm):
+							if (now - gesture_state.last_volume_step) > 0.3:
+								pyautogui.press("volumedown")
+								gesture_state.last_volume_step = now
 
-				# SHARED RIGHT CLICK LOGIC
+				# --- COMBINE AND UPDATE STATE ---
+				# If EITHER hand pinches, trigger the global select (click/drag) state
+				select_touch = r_select or l_select
+				keep_dragging = r_keep or l_keep
+				r_click_touch = r_right or l_right
+
+				# Update the sophisticated click-vs-drag state machine
+				update_select_drag_state(select_touch, keep_dragging, gesture_state, now)
+
+				# Perform the native right-click if the gesture just started
 				if r_click_touch:
 					if not gesture_state.right_touch_prev:
 						send_mouse_click(button="right")
 				gesture_state.right_touch_prev = r_click_touch
 
 			else:
+				# Ensure mouse buttons are released if tracking pauses while dragging
 				gesture_state.reset_movement()
 
+			# --- RENDER UI AND UPDATE WINDOW ---
 			draw_ui_buttons(frame, ui_state, 32, 88, 8, 10, 10)
 			draw_status_and_dpi(frame, ui_state, gesture_state.dpi, 32, 10, 10)
-			position_window(primary_w, primary_h, fw, fh, window_name, 10)
+			position_window(primary_w, primary_h, fw, fh, window_name, 10, ui_state)
 			set_arrow_cursor()
 			cv2.imshow(window_name, frame)
 			if cv2.waitKey(1) & 0xFF == ord("q"): break
